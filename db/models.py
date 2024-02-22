@@ -22,7 +22,7 @@ class Userdb:
         return self.collection.insert_one(details).inserted_id
         
     def get_active_users_by_role(self, role):
-        return self.collection.find({"role": role, "active": "True"})
+        return self.collection.find({"role": role, "active": True})
     
     def get_user_by_role_one(self, role):
         return self.collection.find_one({"role": role})

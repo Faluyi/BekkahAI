@@ -12,7 +12,7 @@ def authenticate_user(email, pwd):
     
     if user_profile: 
         authenticated = check_password_hash(user_profile["password"], pwd)
-        if authenticated:
+        if authenticated and user_profile["active"]:
             return user_profile
 
         else:

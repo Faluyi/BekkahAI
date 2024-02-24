@@ -132,7 +132,7 @@ def current_user_profile(current_user):
         return {
             "status": "success",
             "message": "User profile fecthed successfully",
-            "reponse": user
+            "response": user
         }, 200
         
     except:
@@ -145,19 +145,18 @@ def current_user_profile(current_user):
 @token_required
 def update_user_profile(current_user, user_id):
     body = request.get_json()
-    
-    details = {
-        
-    }
+    app.logger.info(body)
+    app.logger.info(user_id)
     
     try:
-        Users_db.update_user_profile(user_id, details)
+        Users_db.update_user_profile(user_id, body)
         user = Users_db.get_user_by_id(user_id)
-                
+        user["_id"] = str(user["_id"])
+        del user["password"]  
         return {
             "status": "success",
             "message": "User profile updated successfully",
-            "reponse": str(user["_id"])
+            "response": user
         }, 200
         
     except:
@@ -166,7 +165,84 @@ def update_user_profile(current_user, user_id):
             "message": "Internal server error"
         }, 500
 
+@app.patch('/api/user/<user_id>/change_password')
+@token_required
+def update_user_password(current_user, user_id):
+    body = request.get_json()
+    app.logger.info(body)
+    app.logger.info(user_id)
+    
+    for value in body.values():
+        if value == '':
+            return {
+                "status": "failed",
+                "message": "Field missing!",
+            }, 400
+    
+    try:
+        user = Users_db.get_user_by_id(user_id)
+        app.logger.info(user["password"])
+        if not check_password_hash(user["password"], body['old_password']) :
+            return {
+            "status": "failed",
+            "message": "Unauthorized request"
+        }, 401
+        
+        if body["new_password_1"] == body["new_password_2"]:
+            new_password = generate_password_hash(body["new_password_1"])
+            Users_db.update_user_profile(user_id, {"password": new_password})
+             
+            return {
+                "status": "success",
+                "message": "Password changed successfully",
+            }, 200
+        
+        else:
+            return {
+            "status": "failed",
+            "message": "Unmatching passwords"
+        }, 404
+        
+    except:
+        return {
+            "status": "failed",
+            "message": "Internal server error"
+        }, 500
+        
+        
+@app.patch('/api/user/<user_id>/change_email')
+@token_required
+def update_user_email(current_user, user_id):
+    body = request.get_json()
+    app.logger.info(body)
+    app.logger.info(user_id)
+    
+    
+    try:
+        user = Users_db.get_user_by_id(user_id)
+        
+        if check_password_hash(user["password"], body['old_password']) :
 
+            return {
+            "status": "failed",
+            "message": "Unauthorized request"
+        }, 401
+        
+        new_email = body["new_email"]
+        Users_db.update_user_profile(user_id, {"email": new_email})
+            
+        return {
+            "status": "success",
+            "message": "Email changed successfully",
+        }, 200
+        
+       
+    except:
+        return {
+            "status": "failed",
+            "message": "Internal server error"
+        }, 500
+        
 @app.get('/api/user/<user_id>')
 @token_required
 def user_profile(current_user, user_id):
@@ -175,11 +251,12 @@ def user_profile(current_user, user_id):
         user = Users_db.get_user_by_id(user_id)
         
         user["_id"] = str(user["_id"])
+        del user["password"]
         
         return {
             "status": "success",
             "message": "User profile fecthed successfully",
-            "reponse": user
+            "response": user
         }, 200
         
     except:
@@ -502,7 +579,7 @@ def get_active_waste_masters(current_user):
 @token_required
 def approve(current_user, user_id):
     try:
-        approved = Users_db.update_user_profile_by_id(user_id, {"status": "Approved", "active": True})
+        approved = Users_db.update_user_profile(user_id, {"status": "Approved", "active": True})
         
         if approved:
             return {
@@ -528,7 +605,7 @@ def approve(current_user, user_id):
 @token_required
 def reject(current_user, user_id):
     try:
-        rejected = Users_db.update_user_profile_by_id(user_id, {"status": "Rejected"})
+        rejected = Users_db.update_user_profile(user_id, {"status": "Rejected"})
         
         if rejected:
             return {
@@ -551,40 +628,13 @@ def reject(current_user, user_id):
         }, 500
         
 
-@app.get('/api/user/<user_id>')
-@token_required
-def get_user(current_user, user_id):
-    
-    try:
-        user = Users_db.get_user_by_id(user_id)
-        
-        if user:
-            user["_id"] = str(user["_id"])
-            del user["password"]
-            app.logger.info(user)
-            return {
-                "status": "success",
-                "message": "User fetched successfully",
-                "response": user
-            }, 200
-        else:
-            return {
-                "status": "failed",
-                "message": "Bad request"
-            }, 400
-            
-    except:
-        return {
-            "status": "failed",
-            "message": "Internal Server Error"
-        }, 500
         
 @app.patch('/api/user/<user_id>/disable')
 @token_required
 def disable_user(current_user, user_id):
     
     try:
-        disabled = Users_db.update_user_profile_by_id(user_id, {"active": False})
+        disabled = Users_db.update_user_profile(user_id, {"active": False})
 
         if disabled:
             return {

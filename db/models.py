@@ -27,6 +27,13 @@ class Userdb:
     def get_user_by_role_one(self, role):
         return self.collection.find_one({"role": role})
     
+    def get_master_by_location(self, location):
+        return self.collection.find_one({"role": "waste-master", "location": location, "active": True})
+    
+    def get_aggregators_by_location(self, location):
+        return self.collection.find({"role": "waste-aggregator", "location": location, "active": True})
+    
+    
     def get_user_by_email(self, email):
         return self.collection.find_one({"email": email})
     
@@ -85,6 +92,9 @@ class DonationRequestsdb:
     def get_all_active_donations(self):
         return self.collection.find({"status": "Pending" or "pending"})
     
+    def get_all_active_donations_by_location(self, location):
+        return self.collection.find({"status": "Pending" or "pending", "drop_off_location": location})
+
     
 class Eqptdb:
     def __init__(self) -> None:

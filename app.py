@@ -6,6 +6,7 @@ from datetime import datetime
 from flask_cors import CORS
 from auth import authenticate_user, token_required
 import jwt
+from properties import *
 
 
 
@@ -16,7 +17,7 @@ CORS(app, supports_credentials=True)
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 465
 app.config['MAIL_USERNAME'] = 'faluyiisaiah@gmail.com'
-app.config['MAIL_PASSWORD'] = 'nawhobogecypovbo'
+app.config['MAIL_PASSWORD'] = mail_pswd
 app.config['MAIL_USE_TLS'] = False
 app.config['MAIL_USE_SSL'] = True
 mail = Mail(app)

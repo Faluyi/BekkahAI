@@ -163,11 +163,11 @@ def current_user_profile(current_user):
     
     try:
         user = Users_db.get_user_by_id(user_id)
-        notifications = list(Notifications_db.get_notifications_by_location(user["location"]))
-        for notification in notifications:
-            notification["_id"] = str(notification["_id"])
-        app.logger.info(user)
-        app.logger.info(notifications)
+        # notifications = list(Notifications_db.get_notifications_by_location(user["location"]))
+        # for notification in notifications:
+        #     notification["_id"] = str(notification["_id"])
+        # app.logger.info(user)
+        # app.logger.info(notifications)
         
         user["_id"] = str(user["_id"])
         del user["password"]
@@ -176,7 +176,7 @@ def current_user_profile(current_user):
             "status": "success",
             "message": "User profile fecthed successfully",
             "response": user,
-            "notifications": notifications
+            # "notifications": notifications
         }, 200
         
     except:

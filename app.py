@@ -26,6 +26,7 @@ mail = Mail(app)
 bcrypt = Bcrypt(app)
 Users_db = Userdb()
 Donations_requests_db = DonationRequestsdb()
+Notifications_db = Notificationsdb()
 
 SECRET_KEY = "bekkah"
 app.config['SECRET_KEY'] = SECRET_KEY
@@ -162,14 +163,20 @@ def current_user_profile(current_user):
     
     try:
         user = Users_db.get_user_by_id(user_id)
+        notifications = list(Notifications_db.get_notifications_by_location(user["location"]))
+        for notification in notifications:
+            notification["_id"] = str(notification["_id"])
         app.logger.info(user)
+        app.logger.info(notifications)
+        
         user["_id"] = str(user["_id"])
         del user["password"]
         
         return {
             "status": "success",
             "message": "User profile fecthed successfully",
-            "response": user
+            "response": user,
+            "notifications": notifications
         }, 200
         
     except:
@@ -306,50 +313,64 @@ def user_profile(current_user, user_id):
 @app.post('/api/donate')
 @token_required
 def donate(current_user):
-   body = request.get_json()
+    body = request.get_json()
    
-   app.logger.info(body)
-   for value in body.values():
-        if value == '':
-            return {
-                "status": "failed",
-                "message": "Field missing!",
-            }, 400
+    app.logger.info(body)
+    for value in body.values():
+            if value == '':
+                return {
+                    "status": "failed",
+                    "message": "Field missing!",
+                }, 400
 
     
-   request_details = {
-       'donor_id': current_user["_id"],
-       'category': body["category"],
-       'weight': body["weight"],
-       'drop_off_location': body["drop_off"],
-       'pickup_location':{
-           "address": body["pickup_location"],
-           "latitude": body["lat"],
-           "longitude": body["long"]
-       },
-       'scheduled_pickup_time': body["checked_radio_button"],
-       'status': 'Pending',
-       'datetime_created': datetime.now()
-   }
+    request_details = {
+        'donor_id': current_user["_id"],
+        'category': body["category"],
+        'weight': body["weight"],
+        'drop_off_location': body["drop_off"],
+        'pickup_location':{
+            "address": body["pickup_location"],
+            "latitude": body["lat"],
+            "longitude": body["long"]
+        },
+        'scheduled_pickup_time': body["checked_radio_button"],
+        'status': 'Pending',
+        'datetime_created': datetime.now()
+    }
+    
    
-   try:
-       request_id = Donations_requests_db.create_request(request_details)
+    
+    try:
+        request_id = Donations_requests_db.create_request(request_details)
+        
+        notification_details = {
+       "title": "Pick-up request",
+       "donation_id": str(request_id),
+       "pickup_address": body["pickup_location"],
+       "Location": body["drop-off"],
+       "waste_weight": body["weight"],
+       "waste_category": body["category"],
+       "date_time": datetime.now(),
+       "read_by": []
+   }
+        Notifications_db.new_input(notification_details)
+        
+        return {
+            "status": "success",
+            "message": "Donation request created",
+            "response": {
+                'request_id': str(request_id)
+            }
+        }, 200
        
-       return {
-           "status": "success",
-           "message": "Donation request created",
-           "response": {
-               'request_id': str(request_id)
-           }
-       }, 200
        
-       
-   except:
-       return {
-           "status": "failed",
-           "message": "Failed to create donation request"
-       }, 500
- 
+    except:
+        return {
+            "status": "failed",
+            "message": "Failed to create donation request"
+        }, 500
+    
 @app.get('/api/donations')
 @token_required
 def get_all_donations(current_user):
@@ -390,6 +411,7 @@ def get_donation(current_user, donation_id):
         if request_details:
             request_details["_id"] = str(request_details["_id"])
             request_details["donor_id"] = str(request_details["donor_id"])
+            request_details["user_role"] = current_user["role"]
             return {
                 "status": "success",
                 "message": "Donation request found",
@@ -406,6 +428,70 @@ def get_donation(current_user, donation_id):
             "status": "failed",
             "message": "Internal Server Error"
         }, 500
+        
+        
+       
+@app.patch('/api/donation/<donation_id>/interested')
+@token_required
+def interested(current_user, donation_id):
+    app.logger.info(donation_id)
+    
+    try:
+        request_details = Donations_requests_db.get_specific_request(donation_id)["interested_aggregators"]
+        app.logger.info(request_details)
+        
+        
+        if request_details:
+            request_details[str(current_user["_id"])] = {"full_name": current_user["first_name"] + "" + current_user["last_name"], "review": current_user["review"], "total_no_of_pickups": current_user["total_no_of_pickups"], "date_time": datetime.now()}
+            Donations_requests_db.update_request(donation_id, request_details)
+            return {
+                "status": "success",
+                "message": "Donation request found",
+                "response": request_details
+            }, 200
+            
+        
+        else:
+            request_details = {
+                "interested_aggregators": {
+                    str(current_user["_id"]) : {"full_name": current_user["first_name"] + "" + current_user["last_name"], "review": current_user["review"], "total_no_of_pickups": current_user["total_no_of_pickups"], "date_time": datetime.now()}
+                }
+            }
+            Donations_requests_db.update_request(donation_id, request_details)
+            
+    except:
+        return {
+            "status": "failed",
+            "message": "Internal Server Error"
+        }, 500
+  
+    
+@app.patch('/api/donation/<donation_id>/not-interested')    
+@token_required
+def not_interested(current_user, donation_id):
+    app.logger.info(donation_id)
+    
+    try:
+        request_details = Donations_requests_db.get_specific_request(donation_id)["interested_aggregators"]
+        app.logger.info(request_details)
+        
+        
+        if request_details:
+            del request_details[str(current_user["_id"])]
+            Donations_requests_db.update_request(donation_id, request_details)
+            return {
+                "status": "success",
+                "message": "Donation request found",
+                "response": request_details
+            }, 200
+            
+        
+    except:
+        return {
+            "status": "failed",
+            "message": "Internal Server Error"
+        }, 500
+
     
         
 @app.get('/api/dashboard/admin')
@@ -453,7 +539,8 @@ def master_dashboard(current_user):
     try:
         active_donations = list(Donations_requests_db.get_all_active_donations_by_location(current_user["location"]))
         active_aggregators = list(Users_db.get_aggregators_by_location(current_user["location"]))
-        
+        completed_donations = list(Donations_requests_db.get_all_completed_donations_waste_master(current_user["location"]))
+
         app.logger.info(active_donations)
         app.logger.info(active_aggregators)
         
@@ -463,6 +550,7 @@ def master_dashboard(current_user):
             "response": {
                 "active_donations": len(active_donations),
                 "active_aggregators": len(active_aggregators),
+                "active_aggregators": len(completed_donations),
             }
         }, 200
 
@@ -478,14 +566,17 @@ def aggregator_dashboard(current_user):
     
     try:
         active_donations = list(Donations_requests_db.get_all_active_donations_by_location(current_user["location"]))
-        
+        completed_donations = list(Donations_requests_db.get_all_completed_donations_waste_aggregator(str(current_user["_id"])))
+
         app.logger.info(active_donations)
+        app.logger.info(completed_donations)
         
         return {
             "status": "success",
             "message": "Reports fetched successfully",
             "response": {
                 "active_donations": len(active_donations),
+                "completed_donations": len(completed_donations)
             }
         }, 200
 
@@ -552,6 +643,56 @@ def get_active_donations(current_user):
             "message": "Internal Server Error"
         }, 500
         
+        
+@app.get('/api/donations/completed')
+@token_required
+def get_completed_donations(current_user):
+    
+    try:
+        if current_user["role"] == "Admin":
+            completed_donations = list(Donations_requests_db.get_all_completed_donations())
+            
+            for donation in completed_donations:
+                donation["_id"] = str(donation['_id'])
+                donation["donor_id"] = str(donation['donor_id'])
+            app.logger.info(completed_donations)
+            return {
+                "status": "success",
+                "message": "Completed donations fetched successfully",
+                "response": completed_donations
+            }, 200
+        
+        elif current_user["role"] == "waste-master":
+            completed_donations = list(Donations_requests_db.get_all_completed_donations_waste_master(current_user["location"]))
+            for donation in completed_donations:
+                donation["_id"] = str(donation['_id'])
+                donation["donor_id"] = str(donation['donor_id'])
+            app.logger.info(completed_donations)
+            return {
+                "status": "success",
+                "message": "Completed donations fetched successfully",
+                "response": completed_donations
+            }, 200
+            
+        elif current_user["role"] == "waste-aggregator":
+            completed_donations = list(Donations_requests_db.get_all_completed_donations_waste_aggregator(str(current_user["_id"])))
+            for donation in completed_donations:
+                donation["_id"] = str(donation['_id'])
+                donation["donor_id"] = str(donation['donor_id'])
+            app.logger.info(completed_donations)
+            return {
+                "status": "success",
+                "message": "Completed donations fetched successfully",
+                "response": completed_donations
+            }, 200
+        
+    except:
+        return {
+            "status": "failed",
+            "message": "Internal Server Error"
+        }, 500
+
+
 @app.get('/api/users/disabled')
 @token_required
 def get_disabled_users(current_user):

@@ -92,13 +92,22 @@ class DonationRequestsdb:
     def get_all_active_donations(self):
         return self.collection.find({"status": "Pending" or "pending"})
     
+    def get_all_completed_donations(self):
+        return self.collection.find({"status": "Completed"})
+    
+    def get_all_completed_donations_waste_master(self, master_location):
+        return self.collection.find({"status": "Completed", "drop_off_location": master_location})
+    
+    def get_all_completed_donations_waste_aggregator(self, aggregator_id):
+        return self.collection.find({"status": "Completed", "aggregator": {"id": aggregator_id}})
+    
     def get_all_active_donations_by_location(self, location):
         return self.collection.find({"status": "Pending" or "pending", "drop_off_location": location})
 
     
-class Eqptdb:
+class Notificationsdb:
     def __init__(self) -> None:
-        self.collection = Eqpts
+        self.collection = Notifications
     
     def new_input(self, dtls):
         return self.collection.insert_one(dtls.__dict__).inserted_id
@@ -109,14 +118,14 @@ class Eqptdb:
     def delete_existing_eqpt(self, eqpt_id):
         return self.collection.delete_one({"_id":ObjectId(eqpt_id)}).deleted_count>0
     
-    def get_eqpt_by_id(self, eqpt_id):
-        return self.collection.find_one({"_id":ObjectId(eqpt_id)})
+    def get_notifications_by_location(self, location):
+        return self.collection.find({"Location": location})
     
     def get_eqpt_by_name(self, eqpt_name):
         return self.collection.find_one({'$text':{'$search':eqpt_name}})
     
-    def get_all_eqpt(self):
-        return self.collection.find().sort("name")
+    def get_all_notifications(self):
+        return self.collection.find().sort("date_time")
     
     def get_all_available_eqpt(self):
         return self.collection.find({"status":"available"}).sort("name")

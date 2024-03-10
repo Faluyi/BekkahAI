@@ -13,8 +13,8 @@ from pymongo.errors import DuplicateKeyError
 
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="http://wastemanagementapp.waste4meal.com/")
 CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="http://wastemanagementapp.waste4meal.com")
 
 
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'

@@ -1,4 +1,5 @@
-from pymongo import MongoClient
+from pymongo import MongoClient, ASCENDING
+from pymongo.errors import DuplicateKeyError
 from bson.objectid import ObjectId 
 from properties import *
 import string, random
@@ -13,6 +14,8 @@ Waste_Donated_Records = db['Waste_Donated_Records']
 Location = db['Location']
 Notifications = db['Notifications']
 
+Users.create_index([('email', ASCENDING)], unique=True)
+Location.create_index({"coordinates": "2dsphere" })
 
 class Userdb:
     def __init__(self) -> None:
@@ -82,6 +85,9 @@ class DonationRequestsdb:
     
     def get_requests_by_donor_id(self, donor_id):
         return self.collection.find({"donor_id": donor_id}).sort("datetime_created")
+    
+    def get_requests_by_aggregator_id(self, aggregator_id):
+        return self.collection.find({"aggregator.id": aggregator_id}).sort("datetime_created")
     
     def get_request_by_donor_id_limited(self, donor_id):
         return self.collection.find({"donor_id": donor_id}).sort("datetime_created")

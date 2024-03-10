@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_mail import Mail, Message
+from flask_socketio import SocketIO
 from db.models import *
 from flask_bcrypt import Bcrypt, check_password_hash, generate_password_hash
 from datetime import datetime
@@ -7,12 +8,14 @@ from flask_cors import CORS
 from auth import authenticate_user, token_required
 import jwt
 from properties import *
-
+from pymongo.errors import DuplicateKeyError
 
 
 
 app = Flask(__name__)
-CORS(app, supports_credentials=True)
+socketio = SocketIO(app, cors_allowed_origins="http://127.0.0.1:8080")
+CORS(app)
+
 
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 465
@@ -30,6 +33,8 @@ Notifications_db = Notificationsdb()
 
 SECRET_KEY = "bekkah"
 app.config['SECRET_KEY'] = SECRET_KEY
+
+
 
 
 @app.post('/api/register')
@@ -102,7 +107,14 @@ def register():
                 "status": "success",
                 "message": "User registration successful"
             }, 200
-    except:
+            
+    except DuplicateKeyError:
+        return {
+            "status": "failed",
+            "message": "Email address already in use"
+        }, 400
+        
+    except :
         return {
             "status": "failed",
             "message": "Internal Server Error"
@@ -118,13 +130,20 @@ def sign_in():
         if value == '':
             return {
                 "status": "failed",
-                "message": "Field missing!",
+                "message": "Field missing !",
             }, 400
     
     email = body["email"]
     password = body["password"] 
     
     user_profile = authenticate_user(email, password)
+    
+    if user_profile == "not found":
+        return {
+            "status": "failed",
+            "message": "Invalid email address !"
+        }, 404
+        
     if user_profile:
         try:
             token = jwt.encode({
@@ -152,7 +171,7 @@ def sign_in():
     else:
         return {
             "status": "failed",
-            "message": "Unauthorized"
+            "message": "Invalid password!"
         }, 401
 
 
@@ -945,9 +964,20 @@ def delete_donation(current_user, donation_id):
             "message": "Internal Server Error"
         }, 500
 
-
-
+@socketio.on('connect')
+def handle_connect():
+    app.logger.info('Client connected')
+    
+    
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Client disconnected')
+    
+    
+@socketio.on('get_location')
+def handle_get_location(data):
+    app.logger.info(data)
 
         
 if __name__ == "__main__":
-    app.run(debug=True)
+    socketio.run(app, debug=True)

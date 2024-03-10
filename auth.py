@@ -19,7 +19,7 @@ def authenticate_user(email, pwd):
             return False
         
     else:
-        return False
+        return "not found"
     
 
 

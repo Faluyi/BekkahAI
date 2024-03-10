@@ -13,7 +13,7 @@ from pymongo.errors import DuplicateKeyError
 
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="http://127.0.0.1:8080")
+socketio = SocketIO(app, cors_allowed_origins="http://wastemanagementapp.waste4meal.com/")
 CORS(app)
 
 

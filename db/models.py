@@ -1,4 +1,4 @@
-from pymongo import MongoClient, ASCENDING
+from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import DuplicateKeyError
 from bson.objectid import ObjectId 
 from properties import *
@@ -12,10 +12,9 @@ Users = db["Users"]
 Waste_Donation_Requests = db['Waste_Donation_Requests']
 Waste_Donated_Records = db['Waste_Donated_Records']
 Location = db['Location']
-Notifications = db['Notifications']
 
 Users.create_index([('email', ASCENDING)], unique=True)
-Location.create_index({"coordinates": "2dsphere" })
+Location.create_index({"location": "2dsphere" })
 
 class Userdb:
     def __init__(self) -> None:
@@ -25,7 +24,7 @@ class Userdb:
         return self.collection.insert_one(details).inserted_id
         
     def get_active_users_by_role(self, role):
-        return self.collection.find({"role": role, "active": True})
+        return self.collection.find({"role": role, "active": True}).sort([('_id', -1)])
     
     def get_user_by_role_one(self, role):
         return self.collection.find_one({"role": role})
@@ -36,18 +35,17 @@ class Userdb:
     def get_aggregators_by_location(self, location):
         return self.collection.find({"role": "waste-aggregator", "location": location, "active": True})
     
-    
     def get_user_by_email(self, email):
         return self.collection.find_one({"email": email})
     
     def get_user_by_id(self, user_id):
-        return self.collection.find_one({"_id": ObjectId(user_id)})
+        return self.collection.find_one({"_id": ObjectId(user_id), "active": True})
     
     def get_pending_approvals(self):
-        return self.collection.find({"status": "pending"})
+        return self.collection.find({"status": "pending"}).sort([('_id', -1)])
     
     def get_disabled_users(self):
-        return self.collection.find({"status": "Approved","active": False})
+        return self.collection.find({"status": "Approved","active": False}).sort([('_id', -1)])
     
     def update_user_role(self, user_id, dtls):
         return self.collection.update_one({"uid":user_id},{"$set":dtls}).modified_count>0
@@ -55,17 +53,41 @@ class Userdb:
     def update_user_profile(self, _id, dtls):
         return self.collection.update_one({"_id": ObjectId(_id)},{"$set":dtls}).modified_count>0
     
+    def update_user_notifications(self, _id, dtls):
+        return self.collection.update_one({"_id": ObjectId(_id)},{"$push":{"notifications": dtls}}).modified_count>0
+    
     def delete_user(self, _id):
         return self.collection.delete_one({"_id":ObjectId(_id)}).deleted_count>0
-    
-    def get_all_users(self):
-        return self.collection.find().sort("uid")
     
     def get_all_users_limited(self):
         return self.collection.find().limit(4)
     
-   
+    def increment_pending_waste_points(self, _id, points):
+        return self.collection.update_one({'_id': ObjectId(_id)}, {'$inc': {'pending_waste_points': points}},  upsert=True )
     
+    def increment_valid_waste_points(self, _id, points):
+        return self.collection.update_one({'_id': ObjectId(_id)}, {'$inc': {'valid_waste_points': points}},  upsert=True )
+    
+    def decrement_pending_waste_points(self, _id, points):
+        return self.collection.update_one({'_id': ObjectId(_id)}, {'$inc': {'pending_waste_points': -points}})
+    
+    def decrement_valid_waste_points(self, _id, points):
+        return self.collection.update_one({'_id': ObjectId(_id)}, {'$inc': {'valid_waste_points': -points}})
+    
+    def insert_active_donations_aggregator_id(self, donor_id, aggregator_id):
+        return self.collection.update_one({"_id": ObjectId(donor_id)},{"$push":{"active_donations_aggregator_id": aggregator_id}}).modified_count>0
+
+    def remove_active_donations_aggregator_id(self, donor_id, aggregator_id):
+        return self.collection.update_one({"_id": ObjectId(donor_id)},{"$pull": {"active_donations_aggregator_id": aggregator_id}}).modified_count > 0
+    
+    def increment_total_number_of_donations(self, _id):
+        return self.collection.update_one({'_id': ObjectId(_id)}, {'$inc': {'total_donations': 1}},  upsert=True ) 
+    
+    def increment_total_number_of_picked_donations(self, _id):
+        return self.collection.update_one({'_id': ObjectId(_id)}, {'$inc': {'total_donations_picked': 1}},  upsert=True ) 
+    
+    def increment_total_waste_weight_donated(self, _id, waste_weight):
+        return self.collection.update_one({'_id': ObjectId(_id)}, {'$inc': {'total_waste_weight_donated': waste_weight}},  upsert=True )  
     
 class DonationRequestsdb:
     def __init__(self) -> None:
@@ -84,242 +106,109 @@ class DonationRequestsdb:
         return self.collection.find_one({"_id":ObjectId(request_id)})
     
     def get_requests_by_donor_id(self, donor_id):
-        return self.collection.find({"donor_id": donor_id}).sort("datetime_created")
+        return self.collection.find({"donor_id": donor_id}).sort([('_id', -1)])
     
     def get_requests_by_aggregator_id(self, aggregator_id):
-        return self.collection.find({"aggregator.id": aggregator_id}).sort("datetime_created")
+        return self.collection.find({"aggregator.id": aggregator_id}).sort([('_id', -1)])
     
     def get_request_by_donor_id_limited(self, donor_id):
-        return self.collection.find({"donor_id": donor_id}).sort("datetime_created")
-    
-    def get_all_request(self):
-        return self.collection.find()
+        return self.collection.find({"donor_id": donor_id}).sort([('_id', -1)])
     
     def get_all_active_donations(self):
-        return self.collection.find({"status": "Pending" or "pending"})
+        return self.collection.find({"status": "Active"}).sort([('_id', -1)])
     
     def get_all_completed_donations(self):
-        return self.collection.find({"status": "Completed"})
+        return self.collection.find({"status": "Completed"}).sort([('_id', -1)])
     
     def get_all_completed_donations_waste_master(self, master_location):
-        return self.collection.find({"status": "Completed", "drop_off_location": master_location})
+        return self.collection.find({"status": "Completed", "drop_off_location": master_location}).sort([('_id', -1)])
     
     def get_all_completed_donations_waste_aggregator(self, aggregator_id):
-        return self.collection.find({"status": "Completed", "aggregator": {"id": aggregator_id}})
+        return self.collection.find({"status": "Completed", "aggregator": {"id": aggregator_id}}).sort([('_id', -1)])
     
     def get_all_active_donations_by_location(self, location):
-        return self.collection.find({"status": "Pending" or "pending", "drop_off_location": location})
+        return self.collection.find({"status": "Pending", "drop_off_location": location}).sort([('_id', -1)])
 
+    def get_all_active_donations_by_aggregator_id(self, aggregator_id):
+        status_values = ["Active", "picked"]
+        return self.collection.find({"status": {"$in": status_values}, "aggregator.id": aggregator_id}).sort([('_id', -1)])
     
-class Notificationsdb:
+    def get_all_pending_requests_by_aggregrator(self):
+        return self.collection.find({"status":"Pending"}).sort([('_id', -1)])
+    
+    
+class Locationsdb:
     def __init__(self) -> None:
-        self.collection = Notifications
-    
-    def new_input(self, dtls):
-        return self.collection.insert_one(dtls.__dict__).inserted_id
-    
-    def update_eqpt_dtls(self,eqpt_id, dtls):
-        return self.collection.update_one({"_id":ObjectId(eqpt_id)},{"$set":dtls.__dict__}).modified_count>0
-
-    def delete_existing_eqpt(self, eqpt_id):
-        return self.collection.delete_one({"_id":ObjectId(eqpt_id)}).deleted_count>0
-    
-    def get_notifications_by_location(self, location):
-        return self.collection.find({"Location": location})
-    
-    def get_eqpt_by_name(self, eqpt_name):
-        return self.collection.find_one({'$text':{'$search':eqpt_name}})
-    
-    def get_all_notifications(self):
-        return self.collection.find().sort("date_time")
-    
-    def get_all_available_eqpt(self):
-        return self.collection.find({"status":"available"}).sort("name")
-    
-    
-class lost_eqptdb:
-    def __init__(self) -> None:
-        self.collection = lost_eqpts
+        self.collection = Location
         
     def new_input(self, dtls):
-        return self.collection.insert_one(dtls.__dict__).inserted_id
+        return self.collection.insert_one(dtls).inserted_id
 
     def get_all(self):
         return self.collection.find().sort("date_time")
     
-    def get_eqpt_by_id(self, eqpt_id):
-        return self.collection.find_one({"_id":ObjectId(eqpt_id)})
+    def get_location_by_id(self, location_id):
+        return self.collection.find_one({"_id":ObjectId(location_id)})
     
-    def update_eqpt_dtls(self,eqpt_id, dtls):
-        return self.collection.update_one({"_id":ObjectId(eqpt_id)},{"$set":dtls.__dict__}).modified_count>0
-    
-    def delete_lost_eqpt(self, eqpt_id):
-        return self.collection.delete_one({"_id":ObjectId(eqpt_id)}).deleted_count>0
+    def get_location_by_user_id(self, location_id):
+        return self.collection.find_one({"user_id":location_id})
     
     
-class Requestdb:
-    def __init__(self) -> None:
-        self.collection = Requests
+    def update_location_data(self,user_id, dtls):
+        return self.collection.update_one({"user_id": user_id},{"$set":dtls}).modified_count>0
     
-    def insert_new(self, request):
-        return self.collection.insert_one(request.__dict__).inserted_id
+    def get_users_within_radius(self, pickup_location, radius) -> list:
+        return self.collection.find({ "location": {
+            "$nearSphere": {
+                "$geometry": {
+                    "type": "Point",
+                    "coordinates": [pickup_location["longitude"], pickup_location["latitude"]]
+                },
+                "$maxDistance": radius * 1000
+            }
+        }})
+        
+        
+  
+class Notifications:
     
-    def get_all(self):
-        return self.collection.find().sort("date_time", -1)
+    def get_pickup_requests(user_notifications):
     
-    def get_by_request_id(self, _id):
-        return self.collection.find_one({"_id":ObjectId(_id)})
+        requests = []
+        for notification in user_notifications:
+            if notification["status"] == "Pending":
+                requests.append(notification)
 
-    def get_by_sender(self, _id, uid):
-        return self.collection.find({"sender":{"_id":_id, "uid":uid}}).sort("date_time", -1)
-    
-    def get_by_sender_limited(self, _id, uid):
-        return self.collection.find({"sender":{"_id":_id, "uid":uid}}).sort("date_time", -1).limit(3)
-    
-    def get_by_recipient(self, position, _id):
-        return self.collection.find({"recipient":{"position":position, "id":ObjectId(_id)}}).sort("date_time", -1)
-    
-    def get_by_recipient_limited(self, position, user_id):
-        return self.collection.find({"recipient":{"position":position, "id":ObjectId(user_id)}}).sort("date_time", -1).limit(3)
-    
-    def update_request_dtls(self,request_id, dtls):
-        return self.collection.update_one({"_id":ObjectId(request_id)},{"$set":dtls.__dict__}).modified_count>0
-    
-    def delete_request(self, request_id):
-        return self.collection.delete_one({"_id":ObjectId(request_id)}).deleted_count>0
-    
-    def approve_request(self,request_id):
-        return self.collection.update_one({"_id":ObjectId(request_id)},{"$set":{"status":"Approved"}}).modified_count>0
-    
-    def decline_request(self,request_id):
-        return self.collection.update_one({"_id":ObjectId(request_id)},{"$set":{"status":"Declined"}}).modified_count>0
- 
-    
-class Reportdb:
-    def __init__(self) -> None:
-        self.collection = Reports
-    
-    def insert_new(self, request):
-        return self.collection.insert_one(request.__dict__).inserted_id 
-    
-    def get_all(self):
-        return self.collection.find().sort("date_time", -1)
-    
-    def get_by_report_id(self, _id):
-        return self.collection.find_one({"_id":ObjectId(_id)})
+        return requests
 
-    def get_by_sender(self, _id, uid):
-        return self.collection.find({"sender":{"_id":_id, "uid":uid}}).sort("date_time", -1)
-    
-    def get_by_sender_limited(self, _id, uid):
-        return self.collection.find({"sender":{"_id":_id, "uid":uid}}).sort("date_time", -1).limit(3)
-    
-    def get_by_recipient(self, position):
-        return self.collection.find({"recipient":position}).sort("date_time", -1)
-    
-    def get_by_recipient_limited(self, position):
-        return self.collection.find({"recipient":position}).sort("date_time", -1).limit(3)
-    
-    def update_report_dtls(self,report_id, dtls):
-        return self.collection.update_one({"_id":ObjectId(report_id)},{"$set":dtls.__dict__}).modified_count>0
-    
-    def report_feedback(self,report_id, dtls):
-        return self.collection.update_one({"_id":ObjectId(report_id)},{"$set":dtls}).modified_count>0
-    
-    def mark_completed(self,report_id):
-        return self.collection.update_one({"_id":ObjectId(report_id)},{"$set":{"status":"Completed"}}).modified_count>0
-    
-    def mark_incomplete(self,report_id):
-        return self.collection.update_one({"_id":ObjectId(report_id)},{"$set":{"status":"Incomplete"}}).modified_count>0
-    
-    def delete_report(self, report_id):
-        return self.collection.delete_one({"_id":ObjectId(report_id)}).deleted_count>0
+    def get_active_donations(user_notifications):
+        
+        requests = []
+        for notification in user_notifications:
+            if notification["status"] == "Active":
+                requests.append(notification)
 
+        return requests
     
-class Projectdb:
-    def __init__(self) -> None:
-        self.collection = Projects
-    
-    def insert_new(self, request):
-        return self.collection.insert_one(request.__dict__).inserted_id  
-    
-    def get_all(self):
-        return self.collection.find().sort("date_time")
-    
-    def get_by_project_id(self, _id):
-        return self.collection.find_one({"_id":ObjectId(_id)})
-    
-    def get_submitted_file(self, id):
-        return self.collection.find_one({"submission.id":id})
+    def get_active_donations_aggregators(user_notifications):
+        
+        requests = []
+        for notification in user_notifications:
+            if notification["status"] == "Active":
+                requests.append(notification)
 
-    def get_by_sender(self, _id, uid):
-        return self.collection.find({"sender":{"_id":_id, "uid":uid}}).sort("date_time", -1)
-    
-    def get_by_sender_limited(self, _id, uid):
-        return self.collection.find({"sender":{"_id":_id, "uid":uid}}).sort("date_time", -1).limit(4)
-    
-    def get_by_recipient_dtls(self, category, recipient, name):
-        return self.collection.find({"recipient_dtls":{"category":category, "recipient": recipient, "name":name}}).sort("date_time", -1)
-    
-    def get_by_recipient_dtls_limited(self, category, recipient, name):
-        return self.collection.find({"recipient_dtls":{"category":category, "recipient": recipient, "name":name}}).sort("date_time", -1).limit(4)
-    
-    def update_project_dtls(self, project_id, dtls):
-        return self.collection.update_one({"_id":ObjectId(project_id)},{"$set":dtls.__dict__}).modified_count>0
-    
-    def submit_project(self, project_id, dtls, no_submissions):
-        return self.collection.update_one({"_id":ObjectId(project_id)},{"$set":{"submissions":dtls, "no_submissions":no_submissions}}).modified_count>0
-    
-    def mark_project(self,project_id, project):
-        return self.collection.update_one({"_id":ObjectId(project_id)},{"$set":{"submissions":project}}).modified_count>0
-    
-    def delete_project(self, project_id):
-        return self.collection.delete_one({"_id":ObjectId(project_id)}).deleted_count>0
-    
+        return requests
 
-class Inventorydb:
-    def __init__(self) -> None:
-        self.collection = Inventory
-    
-    def insert_new(self, dtls):
-        return self.collection.insert_one(dtls.__dict__).inserted_id
-    
-    def get_all(self):
-        return self.collection.find().sort("date_inserted")
-    
-class Attendancedb:
-    def __init__(self) -> None:
-        self.collection = Attendance
-    
-    def sign_in(self, dtls):
-        return self.collection.insert_one(dtls).inserted_id
-    
-    def sign_out(self, attendance_id, time_out, status):
-        return self.collection.update_one({"_id":ObjectId(attendance_id)},{"$set":{"time_out": time_out, "status": status}}).modified_count>0
-    
-    def get_attendance(self, user_id):
-        return self.collection.find({"user_id": user_id}).sort("date_time", -1).limit(3)
-     
+    def get_completed_requests(user_notifications):
+        
+        requests = []
+        for notification in user_notifications:
+            if notification["status"] == "Completed":
+                requests.append(notification)
 
-class Attendancedb_v2:
-    def __init__(self) -> None:
-        self.collection = Attendance_v2
-    
-    def sign_in(self, dtls):
-        return self.collection.insert_one(dtls).inserted_id
-    
-    def sign_out(self, attendance_id, time_out, status):
-        return self.collection.update_one({"_id":ObjectId(attendance_id)},{"$set":{"time_out": time_out, "status": status}}).modified_count>0
-    
-    def get_attendance(self, user_id):
-        return self.collection.find({"user_id": user_id}).sort("date_time", -1).limit(3)
-     
-    def get_user_attendance_by_date(self, user_uid, date):
-        return self.collection.find({"user_uid": user_uid, "date":date})
-    
-    def get_marked_in_users(self, date):
-        return self.collection.find({"date": date, "status": "in"}).sort("date_time", -1)
-    
+        return requests
+        
+        
     
 class generate:   
     def password():
@@ -368,160 +257,4 @@ class generate:
             
         return otp
     
-class User:
-    def __init__(self, firstname, surname, fullname, hashed_pwd, uid, stack, niche, role, phone_num, email, mentor_id, avatar, task_id, bio, location, bday, datetime_created) -> None:
-        self.firstname = firstname
-        self.surname = surname
-        self.fullname = fullname
-        self. hashed_pwd = hashed_pwd
-        self.uid = uid
-        self.stack = stack
-        self.niche = niche
-        self.role = role
-        self.phone_num = phone_num
-        self.email = email
-        self.mentor_id = mentor_id
-        self.avatar = avatar
-        self.task_id = task_id   
-        self.datetime_created = datetime_created
-        self.bio = bio
-        self.location = location
-        self.bday = bday
-
-class Eqpt:
-    def __init__(self, name, quantity, description, date_of_arrival, type, status, datetime_inputed, date_inserted) -> None:
-        self.name = name
-        self.quantity = quantity
-        self.description = description
-        self.date_of_arrival = date_of_arrival
-        self.type = type
-        self.status = status
-        self.datetime_inputed = datetime_inputed
-        self.date_inserted = date_inserted
-        
-class existEqpt:
-    def __init__(self, quantity, datetime_inputed, status) -> None:
-        self.quantity = quantity
-        self.datetime_inputed = datetime_inputed
-        self.status = status
-
-class lostEqpt:
-    def __init__(self, eqpt_id, name, type, quantity, personnel_id, status, date_reported, date_edited) -> None:
-        self.eqpt_id = eqpt_id
-        self.name = name
-        self.type = type
-        self.quantity = quantity
-        self.personnel_id = personnel_id
-        self.status = status
-        self.date_reported = date_reported
-        self.date_edited = date_edited
-
-class updateUser:
-    def __init__(self, filename, phone_num, bio, location, bday) -> None:
-        self.avatar = filename
-        self.phone_num = phone_num
-        self.bio = bio
-        self.location = location
-        self.bday = bday
-        
-class updateAdmin:
-    def __init__(self, firstname, surname, fullname, uid, stack, niche, role, filename, phone_num, email, bio, location, bday) -> None:
-        self.firstname = firstname
-        self.surname = surname
-        self.fullname = fullname
-        self.uid = uid
-        self.stack = stack
-        self.niche = niche
-        self.role = role
-        self.phone_num = phone_num
-        self.email = email
-        self.avatar = filename 
-        self.bio = bio
-        self.location = location
-        self.bday = bday
-
-class AdminUpdateUser:
-    def __init__(self, firstname, surname, fullname, uid, stack, niche, role) -> None:
-        self.firstname = firstname
-        self.surname = surname
-        self.fullname = fullname
-        self.uid = uid
-        self.stack = stack
-        self.niche = niche
-        self.role = role
-        
-class Request:
-    def __init__(self, title, type, eqpt, quantity, date_from, date_to, purpose, sender, recipient_dtls, status, date_submitted, date_time) -> None:
-        self.title = title
-        self.type = type
-        self.eqpt = eqpt
-        self.quantity = quantity
-        self.date_from = date_from
-        self.date_to = date_to
-        self.purpose = purpose
-        self.sender = sender
-        self.recipient = recipient_dtls
-        self.status = status
-        self.date_submitted = date_submitted
-        self.date_time = date_time
-        
-class Project:
-    def __init__(self, topic, focus, objectives, recipient_dtls, sender, date_created, deadline, date_time) -> None:
-        self.topic = topic
-        self.focus = focus
-        self.objectives = objectives
-        self.recipient_dtls = recipient_dtls
-        self.sender = sender
-        self.date_created = date_created
-        self.deadline = deadline
-        self.date_time = date_time
-        
-class Report:
-    def __init__(self, title, report_no, content, recipient, sender, date_submitted, status, date_time) -> None:
-        self.title = title
-        self.report_no = report_no
-        self.content = content
-        self.recipient = recipient
-        self.sender = sender
-        self.date_submitted = date_submitted
-        self.status = status
-        self.date_time = date_time
-        
-class AllowedExtension:    
-    def images(filename):
-        ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'svg'} 
-        return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-    
-    def files(filename):
-        ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docs','docx'} 
-        return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-class Available:
-    def __init__(self, _quantity, _status) -> None:
-        self.status = _status
-        self.quantity = _quantity
-    
-class updateEmail:
-    def __init__(self, new_email) -> None:
-        self.email = new_email
-        
-class updatePwd:
-    def __init__(self, hashed_pwd) -> None:
-        self.hashed_pwd = hashed_pwd
-        
-def formatAttendance(dtls):
-    user_dtls = []
-    for dtl in dtls:
-        user_dtl = {}
-        user_dtl["user_uid"] = dtl["user_uid"]
-        user_dtl["date"] = dtl["date"]
-        user_dtl["time_in"] = dtl["time_in"]
-        user_dtls.append(user_dtl)
-        
-    return user_dtls
-
-def sortFunc(e):
-  return e["date_time"]
-
-
 

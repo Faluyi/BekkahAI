@@ -89,6 +89,10 @@ class Userdb:
     def increment_total_waste_weight_donated(self, _id, waste_weight):
         return self.collection.update_one({'_id': ObjectId(_id)}, {'$inc': {'total_waste_weight_donated': waste_weight}},  upsert=True )  
     
+    def update_weightiest_waste_donated(self, user_id, weight):
+        return self.collection.update_one({"_id": ObjectId(user_id), "weightiest_waste_donated": weight})
+    
+    
 class DonationRequestsdb:
     def __init__(self) -> None:
         self.collection = Waste_Donation_Requests
@@ -152,7 +156,6 @@ class Locationsdb:
     
     def get_location_by_user_id(self, location_id):
         return self.collection.find_one({"user_id":location_id})
-    
     
     def update_location_data(self,user_id, dtls):
         return self.collection.update_one({"user_id": user_id},{"$set":dtls}).modified_count>0

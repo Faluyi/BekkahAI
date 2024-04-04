@@ -14,7 +14,7 @@ from pymongo.errors import DuplicateKeyError
 
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="https://wastemanagementapp.waste4meal.com")
+socketio = SocketIO(app, cors_allowed_origins="http://wastemanagementapp.waste4meal.com")
 
 
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
@@ -523,7 +523,7 @@ def interested(current_user, donation_id):
 @token_required
 def pick_donation(current_user, donation_id):
     
-    body = request.get_json()
+    body = request.get_json() 
     app.logger.info(body)
     
     if "" in body.values():
@@ -606,7 +606,7 @@ def complete_donation(current_user, donation_id):
         
 @app.get('/api/dashboard/admin')
 @token_required
-def admin_dashboard(current_user):
+def  admin_dashboard(current_user):
     
     try:
         pending_approvals = list(Users_db.get_pending_approvals())
@@ -641,6 +641,7 @@ def admin_dashboard(current_user):
             "status": "failed",
             "message": "Internal Server Error"
         }, 500
+        
         
 @app.get('/api/dashboard/master')
 @token_required

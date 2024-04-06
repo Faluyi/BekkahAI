@@ -14,7 +14,9 @@ from pymongo.errors import DuplicateKeyError
 
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="https://wastemanagement.waste4meal.com")
+# socketio = SocketIO(app, cors_allowed_origins="https://wastemanagement.waste4meal.com")
+socketio = SocketIO(app, cors_allowed_origins="http://127.0.0.1:8080")
+
 
 
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
@@ -31,6 +33,8 @@ Users_db = Userdb()
 Donations_requests_db = DonationRequestsdb()
 Notifications_db = Notifications()
 Locations_db = Locationsdb()
+Delivery_Confirmation_Requestsdb = ConfirmationRequestsdb()
+Waste_point_ratesdb = WastePointRatesdb()
 
 SECRET_KEY = "bekkah"
 app.config['SECRET_KEY'] = SECRET_KEY
@@ -388,6 +392,7 @@ def donate(current_user):
        "pickup_address": body["pickup_location"],
        "waste_weight": body["weight"],
        "waste_category": body["category"],
+       "info": f'{body["weight"]} Kg of Waste donation requested for pickup at {body["pickup_location"]}',
        "date_time": datetime.now(),
        "status": "Pending",
        "read": False
@@ -537,8 +542,9 @@ def pick_donation(current_user, donation_id):
         earned_points_pending = ((float(body["weight"])) * 1000) / 100
         notification_details = {
             "title": "Waste picked",
-            "donation_id": str(donation_dtls["donor_id"]),
+            "donation_id": donation_id,
             "earned_waste_points": earned_points_pending,
+            "info": f'Your waste has been picked. You can now track your waste',
             "date_time": datetime.now(),
             "status": "picked",
             "read": False
@@ -550,7 +556,11 @@ def pick_donation(current_user, donation_id):
         Users_db.increment_total_number_of_donations(str(donation_dtls["donor_id"]))
         Users_db.increment_total_waste_weight_donated(str(donation_dtls["donor_id"]), float(body["weight"]))
         
+        user_dtls = Users_db.get_user_by_id(str(donation_dtls["donor_id"]))
+        weightiest_waste = user_dtls["weightiest_waste_donated", 0]
         
+        current_weightiest_waste = max(weightiest_waste, body["weight"]/1000)
+        Users_db.update_weightiest_waste_donated(str(donation_dtls["donor_id"]), current_weightiest_waste)
         
         return {
             "status": "success",
@@ -564,40 +574,49 @@ def pick_donation(current_user, donation_id):
             "status": "failed",
             "message": "Internal Server Error"
         }, 500
-
-@app.patch('/api/donation/<donation_id>/completed')    
+        
+        
+@app.patch('/api/donation/<donation_id>/deliver')
 @token_required
-def complete_donation(current_user, donation_id):
-    
+def send_confirmation_request(current_user, donation_id):
     body = request.get_json()
-    app.logger.info(body)
+    
+    master = Users_db.get_user_by_id(body["master_id"])
+    
+    if not master:
+        return {
+            "status": "failed",
+            "message": "Invalid master ID"
+        }, 400
+
+    request_dtls = {
+        "donation_id": donation_id,
+        "aggregator_id": str(current_user["_id"]),
+        "master_id": body["master_id"],
+        "confirmed": False,
+        "date_time": datetime.now()
+    }
+    
     
     try:
-        donation_dtls = Donations_requests_db.get_specific_request(donation_id)
-        earned_points_pending = (float(body["weight"]) * 1000) / 100
-        notification_details = {
-            "title": "Waste donation delivered",
-            "donation_id": str(donation_dtls["donor_id"]),
-            "earned_waste_points": earned_points_pending,
-            "date_time": datetime.now(),
-            "status": "Completed",
-            "read": False
-        }
-        
-        Donations_requests_db.update_request(donation_id, {"status": "Completed", "completion_time": datetime.now()})
-        Users_db.decrement_pending_waste_points(str(donation_dtls["donor_id"]), earned_points_pending)
-        Users_db.increment_valid_waste_points(str(donation_dtls["donor_id"]), earned_points_pending)
-        Users_db.update_user_notifications(str(donation_dtls["donor_id"]), notification_details)
-        Users_db.remove_active_donations_aggregator_id(str(donation_dtls["donor_id"]), donation_dtls["aggregator"]["id"])
-        Users_db.increment_total_number_of_picked_donations(str(donation_dtls["aggregator"]["id"]))
+        sent = Delivery_Confirmation_Requestsdb.create_request(request_dtls)
+
+        if sent:
+            notification_dtls = {
+                "title": "Delivery confirmation request",
+                "info": f'Aggregator {str(current_user["_id"])} request delivery confirmation for donation {donation_id}',
+                "donation_id": donation_id,
+                "date_time": datetime.now()
+            }
+            
+            Users_db.update_user_notifications(body["master_id"], notification_dtls)
+            
         return {
             "status": "success",
-            "message": "Waste donation successfully delivered!",
+            "message": "Delivery confirmation request succesfully sent"
         }, 200
-        
-        
     except:
-        return {
+        {
             "status": "failed",
             "message": "Internal Server Error"
         }, 500
@@ -648,20 +667,18 @@ def  admin_dashboard(current_user):
 def master_dashboard(current_user):
     
     try:
-        active_donations = list(Donations_requests_db.get_all_active_donations_by_location(current_user["location"]))
-        active_aggregators = list(Users_db.get_aggregators_by_location(current_user["location"]))
-        completed_donations = list(Donations_requests_db.get_all_completed_donations_waste_master(current_user["location"]))
+        confirmation_requests = list(Delivery_Confirmation_Requestsdb.get_requests(str(current_user["_id"])))
+        confirmed_deliveries = list(Delivery_Confirmation_Requestsdb.get_confirmed_deliveries(str(current_user["_id"])))
 
-        app.logger.info(active_donations)
-        app.logger.info(active_aggregators)
+        app.logger.info(confirmation_requests)
+        app.logger.info(confirmed_deliveries)
         
         return {
             "status": "success",
             "message": "Reports fetched successfully",
             "response": {
-                "active_donations": len(active_donations),
-                "active_aggregators": len(active_aggregators),
-                "active_aggregators": len(completed_donations),
+                "confirmation_requests": len(confirmation_requests),
+                "confirmed_deliveries": len(confirmed_deliveries),
             }
         }, 200
 
@@ -1092,6 +1109,129 @@ def delete_donation(current_user, donation_id):
             "status": "failed",
             "message": "Internal Server Error"
         }, 500
+        
+        
+@app.patch('/api/notification/<notification_id>/read')
+@token_required
+def read(current_user, notification_id):
+    try:
+        Users_db.mark_notification_as_read(str(current_user["_id"]), notification_id)
+
+        return {
+            "status": "success",
+            "message": "Notification marked as read successfully",
+        }, 200
+        
+    except:
+        return {
+            "status": "failed",
+            "message": "Internal Server Error"
+        }
+
+@app.get('/api/deliveries/pending-confirmations')
+@token_required
+def get_confirmation_requests(current_user):
+    
+    try:
+        request_list = list(Delivery_Confirmation_Requestsdb.get_requests(str(current_user["_id"])))
+        for request in request_list:
+            request["_id"] = str(request["_id"])
+        
+        return {
+            "status": "success",
+            "message": "Requests successfully fetched",
+            "response": request_list
+        }
+    except:
+        return {
+            "status": "failed",
+            "message": "Internal server error"
+        }
+
+
+@app.get('/api/deliveries/confirmed')
+@token_required
+def get_confirmed_deliveries(current_user):
+    
+    try:
+        confirmed_list = list(Delivery_Confirmation_Requestsdb.get_confirmed_deliveries(str(current_user["_id"])))
+        for request in confirmed_list:
+            request["_id"] = str(request["_id"])
+            
+        return {
+            "status": "success",
+            "message": "Request successfully fetched",
+            "response": confirmed_list
+        }
+    except:
+        return {
+            "status": "failed",
+            "message": "Internal server error"
+        }
+        
+@app.get('/api/delivery/<donation_id>/confirm')
+@token_required
+def confirm_delivery(current_user, donation_id):
+    
+    try:
+        dtls = {
+            "confirmed": True,
+            "date_time_confirmed": datetime.now()
+        }
+        
+        confirmed = Delivery_Confirmation_Requestsdb.confirm_delivery(donation_id, dtls)
+        
+        if confirmed:
+            
+            donation_dtls = Donations_requests_db.get_specific_request(donation_id)
+            notification_details = {
+                "title": "Donation Completed",
+                "info": f'Donation {donation_id} delivered successfully',
+                "donation_id": donation_id,
+                "read": False,
+                "date_time": datetime.now()
+                    
+            }
+            
+            earned_points_pending = int(donation_dtls["earned_points_donor"])
+            
+            Donations_requests_db.update_request(donation_id, {"status": "Completed", "completion_time": datetime.now(), "master_id": str(current_user["_id"]) })
+            Users_db.decrement_pending_waste_points(str(donation_dtls["donor_id"]), earned_points_pending)
+            Users_db.increment_valid_waste_points(str(donation_dtls["donor_id"]), earned_points_pending)
+            Users_db.increment_valid_waste_points(str(donation_dtls["aggregator"]["id"]), earned_points_pending)
+            Users_db.update_user_notifications(str(donation_dtls["donor_id"]), notification_details)
+            Users_db.update_user_notifications(str(donation_dtls["aggregator"]["id"]), notification_details)
+            Users_db.remove_active_donations_aggregator_id(str(donation_dtls["donor_id"]), donation_dtls["aggregator"]["id"])
+            Users_db.increment_total_number_of_picked_donations(str(donation_dtls["aggregator"]["id"]))
+                
+            return {
+                "status": "success",
+                "message": "Delivery successfully confirmed",
+            }, 200
+        
+        else:
+            return {
+            "status": "failed",
+            "message": "Unable to confirm deleivery at this time, Internal server error"
+        }, 200
+        
+    except:
+        return {
+            "status": "failed",
+            "message": "Internal server error"
+        }, 200
+
+
+@app.get('/api/admin/set/rate')
+@token_required
+def set_rate(current_user, rate):
+    try:
+        return None
+    except:
+        
+        return None
+    
+
 
 @socketio.on('connect')
 def handle_connect():
@@ -1111,16 +1251,27 @@ def handle_get_location(data):
         "role": data["role"],
         "location": {"type": "Point", "coordinates": [data['longitude'], data['latitude']]}
     }
+    
+    new_coordinates = [data['longitude'], data['latitude']]
     try:
-        Locations_db.update_location_data(data["user_id"], location_data)
-        app.logger.info("User location inserted")
+        location = Locations_db.get_location_by_user_id(data["user_id"])
+        app.logger.info(location)
+        
+        if location:
+            updated = Locations_db.update_location_data(data["user_id"], new_coordinates)
+            app.logger.info(updated)
+            
+            app.logger.info("User location updated")
+        else:
+            Locations_db.new_input(location_data)
+            app.logger.info("User location created")
     except KeyError:
         Locations_db.new_input(location_data)
-        app.logger.info("User location updated")
+        app.logger.info("Key error, user location created")
         
         
 @socketio.on('get_locations')
-def handle_get_locations(user_ids):
+def handle_get_locations(user_ids, room):
     app.logger.info(user_ids)
     locations = {}
     for user_id in user_ids:
@@ -1129,7 +1280,7 @@ def handle_get_locations(user_ids):
         if location_data:
             locations[user_id] = location_data['location']["coordinates"]
     app.logger.info(locations)
-    emit('locations_update', locations)
+    emit('locations_update', locations, room=room)
 
         
 if __name__ == "__main__":

@@ -12,6 +12,8 @@ Users = db["Users"]
 Waste_Donation_Requests = db['Waste_Donation_Requests']
 Waste_Donated_Records = db['Waste_Donated_Records']
 Location = db['Location']
+Delivery_Confirmation_Requests = db["Delivery_Confirmation_Requests"]
+Waste_point_rates = db["Waste_point_rates"]
 
 Users.create_index([('email', ASCENDING)], unique=True)
 Location.create_index({"location": "2dsphere" })
@@ -54,7 +56,10 @@ class Userdb:
         return self.collection.update_one({"_id": ObjectId(_id)},{"$set":dtls}).modified_count>0
     
     def update_user_notifications(self, _id, dtls):
-        return self.collection.update_one({"_id": ObjectId(_id)},{"$push":{"notifications": dtls}}).modified_count>0
+        return self.collection.update_one({"_id": ObjectId(_id)},{"$push": {"notifications": {"$each": [dtls], "$position": 0}}}).modified_count>0
+    
+    def mark_notification_as_read(self, user_id, donation_id):
+        return self.collection.update_one({"_id": ObjectId(user_id), 'notifications.donation_id': donation_id},{'$set': {'notifications.$.read': True}}).modified_count>0
     
     def delete_user(self, _id):
         return self.collection.delete_one({"_id":ObjectId(_id)}).deleted_count>0
@@ -91,6 +96,7 @@ class Userdb:
     
     def update_weightiest_waste_donated(self, user_id, weight):
         return self.collection.update_one({"_id": ObjectId(user_id), "weightiest_waste_donated": weight})
+    
     
     
 class DonationRequestsdb:
@@ -154,11 +160,11 @@ class Locationsdb:
     def get_location_by_id(self, location_id):
         return self.collection.find_one({"_id":ObjectId(location_id)})
     
-    def get_location_by_user_id(self, location_id):
-        return self.collection.find_one({"user_id":location_id})
+    def get_location_by_user_id(self, user_id):
+        return self.collection.find_one({"user_id":user_id})
     
-    def update_location_data(self,user_id, dtls):
-        return self.collection.update_one({"user_id": user_id},{"$set":dtls}).modified_count>0
+    def update_location_data(self,user_id, new_coordinates):
+        return self.collection.update_one({"user_id": user_id}, {"$set": {"location": {"type": "Point", "coordinates": new_coordinates}}}).modified_count>0
     
     def get_users_within_radius(self, pickup_location, radius) -> list:
         return self.collection.find({ "location": {
@@ -170,8 +176,44 @@ class Locationsdb:
                 "$maxDistance": radius * 1000
             }
         }})
+    
+    
+class ConfirmationRequestsdb:
+    def __init__(self) -> None:
+        self.collection = Delivery_Confirmation_Requests
         
+    def create_request(self, dtls):
+        return self.collection.insert_one(dtls).inserted_id
+    
+    def get_requests(self, user_id):
+        return self.collection.find({"master_id": user_id, "confirmed": False}).sort([('_id', -1)])
+    
+    def get_confirmed_deliveries(self, user_id):
+        return self.collection.find({"master_id": user_id, "confirmed": True}).sort([('_id', -1)])
         
+    def confirm_delivery(self, donation_id, dtls):
+        return self.collection.update_one({"donation_id":donation_id},{"$set":dtls}).modified_count>0
+
+    def delete_request(self, request_id):
+        return self.collection.delete_one({"_id":ObjectId(request_id)}).deleted_count>0
+    
+    def get_specific_request(self, request_id):
+        return self.collection.find_one({"_id":ObjectId(request_id)})
+
+
+class WastePointRatesdb:
+    def __init__(self) -> None:
+        self.collection = Waste_point_rates
+    
+    def set_rate(self, role, rate):
+        return self.collection.insert_one({"role": role, "rate": rate}).inserted_id
+    
+    def update_rate(self, role, rate):
+        return self.collection.update_one({"role": role},{"$set":{"rate": rate}}).modified_count>0
+    
+    def get_rate(self, role):
+        return self.collection.find_one({"role": role})
+    
   
 class Notifications:
     
@@ -211,7 +253,7 @@ class Notifications:
 
         return requests
         
-        
+
     
 class generate:   
     def password():

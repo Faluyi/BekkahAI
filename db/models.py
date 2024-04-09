@@ -58,8 +58,8 @@ class Userdb:
     def update_user_notifications(self, _id, dtls):
         return self.collection.update_one({"_id": ObjectId(_id)},{"$push": {"notifications": {"$each": [dtls], "$position": 0}}}).modified_count>0
     
-    def mark_notification_as_read(self, user_id, donation_id):
-        return self.collection.update_one({"_id": ObjectId(user_id), 'notifications.donation_id': donation_id},{'$set': {'notifications.$.read': True}}).modified_count>0
+    def mark_notification_as_read(self, user_id, notification_id):
+        return self.collection.update_one({"_id": ObjectId(user_id), 'notifications.notification_id': notification_id},{'$set': {'notifications.$.read': True}}).modified_count>0
     
     def delete_user(self, _id):
         return self.collection.delete_one({"_id":ObjectId(_id)}).deleted_count>0
@@ -175,7 +175,7 @@ class Locationsdb:
                 },
                 "$maxDistance": radius * 1000
             }
-        }})
+        }, "role": "waste-aggregator"})
     
     
 class ConfirmationRequestsdb:
@@ -186,12 +186,15 @@ class ConfirmationRequestsdb:
         return self.collection.insert_one(dtls).inserted_id
     
     def get_requests(self, user_id):
-        return self.collection.find({"master_id": user_id, "confirmed": False}).sort([('_id', -1)])
+        return self.collection.find({"master_id": user_id, "confirmed": False, "rejected": False}).sort([('_id', -1)])
     
     def get_confirmed_deliveries(self, user_id):
         return self.collection.find({"master_id": user_id, "confirmed": True}).sort([('_id', -1)])
+    
+    def get_rejected_deliveries(self, user_id):
+        return self.collection.find({"master_id": user_id, "rejected": True}).sort([('_id', -1)])
         
-    def confirm_delivery(self, donation_id, dtls):
+    def confirm_or_reject_delivery(self, donation_id, dtls):
         return self.collection.update_one({"donation_id":donation_id},{"$set":dtls}).modified_count>0
 
     def delete_request(self, request_id):
@@ -280,7 +283,7 @@ class generate:
             
         return _id 
     
-    def file_id():
+    def notification_id():
         max = int(16)
         digits = string.digits
         file_id = ""

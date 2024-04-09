@@ -9,13 +9,14 @@ from auth import authenticate_user, token_required
 import jwt
 from properties import *
 from pymongo.errors import DuplicateKeyError
-
+import time
+import multiprocessing
 
 
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="https://wastemanagement.waste4meal.com")
-# socketio = SocketIO(app, cors_allowed_origins="http://127.0.0.1:8080")
+# socketio = SocketIO(app, cors_allowed_origins="https://wastemanagement.waste4meal.com")
+socketio = SocketIO(app, cors_allowed_origins='*', manage_session=False)
 
 
 
@@ -159,6 +160,12 @@ def sign_in():
                 "role": user_profile["role"]
             }, app.config["SECRET_KEY"], algorithm="HS256")
             app.logger.info(token)
+            
+            session["user_id"] = str(user_profile["_id"])
+            
+            if user_profile["role"] == "donor" and "active_donations_aggregator_id" in user_profile:
+                session["tracker_id"] = user_profile["active_donations_aggregator_id"][0]
+                                                         
             return jsonify({
                 "status": "success",
                 "message": "Authentication successful",
@@ -392,6 +399,7 @@ def donate(current_user):
        "pickup_address": body["pickup_location"],
        "waste_weight": body["weight"],
        "waste_category": body["category"],
+       "notification_id": generate.notification_id(),
        "info": f'{body["weight"]} Kg of Waste donation requested for pickup at {body["pickup_location"]}',
        "date_time": datetime.now(),
        "status": "Pending",
@@ -410,7 +418,7 @@ def donate(current_user):
             }
         }, 200
         
-       
+        
        
     except Exception as e:
         app.logger.info(e)
@@ -499,8 +507,17 @@ def interested(current_user, donation_id):
                 },
                 "status": "Active"
             }
-        
+
+            notification_details = {
+            "title": "Request accepted",
+            "donation_id": donation_id,
+            "notification_id": generate.notification_id(),
+            "info": f'Your pick up request was just accepted',
+            "date_time": datetime.now(),
+            "read": False
+        }
             Donations_requests_db.update_request(donation_id, aggregator_details)
+            Users_db.update_user_notifications(str(request_details["donor_id"]), notification_details)
         
         
             return {
@@ -544,9 +561,10 @@ def pick_donation(current_user, donation_id):
             "title": "Waste picked",
             "donation_id": donation_id,
             "earned_waste_points": earned_points_pending,
+            "notification_id": generate.notification_id(),
             "info": f'Your waste has been picked. You can now track your waste',
             "date_time": datetime.now(),
-            "status": "picked",
+            "status": "Picked",
             "read": False
         }
         Donations_requests_db.update_request(donation_id, {"status": "picked", "weight": body["weight"], "pickup_time": datetime.now(), "earned_points_donor": earned_points_pending})
@@ -557,7 +575,8 @@ def pick_donation(current_user, donation_id):
         Users_db.increment_total_waste_weight_donated(str(donation_dtls["donor_id"]), float(body["weight"]))
         
         user_dtls = Users_db.get_user_by_id(str(donation_dtls["donor_id"]))
-        weightiest_waste = user_dtls["weightiest_waste_donated", 0]
+        
+        weightiest_waste = user_dtls["weightiest_waste_donated"] if user_dtls["weightiest_waste_donated"] is not None else 0
         
         current_weightiest_waste = max(weightiest_waste, body["weight"]/1000)
         Users_db.update_weightiest_waste_donated(str(donation_dtls["donor_id"]), current_weightiest_waste)
@@ -582,7 +601,7 @@ def send_confirmation_request(current_user, donation_id):
     body = request.get_json()
     
     master = Users_db.get_user_by_id(body["master_id"])
-    
+    donation = Donations_requests_db.get_specific_request(donation_id)
     if not master:
         return {
             "status": "failed",
@@ -592,8 +611,11 @@ def send_confirmation_request(current_user, donation_id):
     request_dtls = {
         "donation_id": donation_id,
         "aggregator_id": str(current_user["_id"]),
+        "Weight": donation["weight"],
         "master_id": body["master_id"],
+        "donor_id": str(donation["donor_id"]),
         "confirmed": False,
+        "rejected": False,
         "date_time": datetime.now()
     }
     
@@ -606,6 +628,7 @@ def send_confirmation_request(current_user, donation_id):
                 "title": "Delivery confirmation request",
                 "info": f'Aggregator {str(current_user["_id"])} request delivery confirmation for donation {donation_id}',
                 "donation_id": donation_id,
+                "notification_id": generate.notification_id(),
                 "date_time": datetime.now()
             }
             
@@ -691,7 +714,6 @@ def master_dashboard(current_user):
 @app.get('/api/dashboard/aggregator')
 @token_required
 def aggregator_dashboard(current_user):
-    app.logger.info(current_user["notifications"])
           
     try:
         pickup_requests = []
@@ -1111,10 +1133,11 @@ def delete_donation(current_user, donation_id):
         }, 500
         
         
-@app.patch('/api/notification/<notification_id>/read')
+@app.get('/api/notification/<notification_id>/read')
 @token_required
 def read(current_user, notification_id):
     try:
+        app.logger.info(notification_id)
         Users_db.mark_notification_as_read(str(current_user["_id"]), notification_id)
 
         return {
@@ -1169,6 +1192,26 @@ def get_confirmed_deliveries(current_user):
             "message": "Internal server error"
         }
         
+@app.get('/api/deliveries/rejected')
+@token_required
+def get_rejected_deliveries(current_user):
+    
+    try:
+        rejected_list = list(Delivery_Confirmation_Requestsdb.get_rejected_deliveries(str(current_user["_id"])))
+        for request in rejected_list:
+            request["_id"] = str(request["_id"])
+            
+        return {
+            "status": "success",
+            "message": "Request successfully fetched",
+            "response": rejected_list
+        }
+    except:
+        return {
+            "status": "failed",
+            "message": "Internal server error"
+        }
+        
 @app.get('/api/delivery/<donation_id>/confirm')
 @token_required
 def confirm_delivery(current_user, donation_id):
@@ -1179,7 +1222,7 @@ def confirm_delivery(current_user, donation_id):
             "date_time_confirmed": datetime.now()
         }
         
-        confirmed = Delivery_Confirmation_Requestsdb.confirm_delivery(donation_id, dtls)
+        confirmed = Delivery_Confirmation_Requestsdb.confirm_or_reject_delivery(donation_id, dtls)
         
         if confirmed:
             
@@ -1188,6 +1231,7 @@ def confirm_delivery(current_user, donation_id):
                 "title": "Donation Completed",
                 "info": f'Donation {donation_id} delivered successfully',
                 "donation_id": donation_id,
+                "notification_id": generate.notification_id(),
                 "read": False,
                 "date_time": datetime.now()
                     
@@ -1204,6 +1248,52 @@ def confirm_delivery(current_user, donation_id):
             Users_db.remove_active_donations_aggregator_id(str(donation_dtls["donor_id"]), donation_dtls["aggregator"]["id"])
             Users_db.increment_total_number_of_picked_donations(str(donation_dtls["aggregator"]["id"]))
                 
+            return {
+                "status": "success",
+                "message": "Delivery successfully confirmed",
+            }, 200
+        
+        else:
+            return {
+            "status": "failed",
+            "message": "Unable to confirm deleivery at this time, Internal server error"
+        }, 200
+        
+    except:
+        return {
+            "status": "failed",
+            "message": "Internal server error"
+        }, 200
+        
+        
+@app.get('/api/delivery/<donation_id>/reject')
+@token_required
+def reject_delivery(current_user, donation_id):
+    
+    try:
+        dtls = {
+            "rejected": True,
+            "date_time_confirmed": datetime.now()
+        }
+        
+        confirmed = Delivery_Confirmation_Requestsdb.confirm_or_reject_delivery(donation_id, dtls)
+        
+        if confirmed:
+            
+            donation_dtls = Donations_requests_db.get_specific_request(donation_id)
+            notification_details = {
+                "title": "Request Declined",
+                "info": f'Request to deliver rejected',
+                "notification_id": generate.notification_id(),
+                "donation_id": donation_id,
+                "read": False,
+                "date_time": datetime.now()
+                    
+            }
+            
+            Users_db.update_user_notifications(str(donation_dtls["aggregator"]["id"]), notification_details)
+
+           
             return {
                 "status": "success",
                 "message": "Delivery successfully confirmed",
@@ -1271,7 +1361,7 @@ def handle_get_location(data):
         
         
 @socketio.on('get_locations')
-def handle_get_locations(user_ids, room):
+def handle_get_locations(user_ids):
     app.logger.info(user_ids)
     locations = {}
     for user_id in user_ids:
@@ -1280,8 +1370,43 @@ def handle_get_locations(user_ids, room):
         if location_data:
             locations[user_id] = location_data['location']["coordinates"]
     app.logger.info(locations)
-    emit('locations_update', locations, room=room)
+    emit('locations_update', locations)
+    
 
+def location_update(interval=5):
+    while True:
+        # Simulate movement by incrementing latitude and longitude by 0.01
+        user = Locations_db.get_location_by_user_id("65d929897e1c6f8b7c75fe5b")
+        current_latitude = user['location']['coordinates'][1]
+        current_longitude = user['location']['coordinates'][0]
+        updated_latitude = current_latitude + 0.01
+        updated_longitude = current_longitude + 0.01
+        Locations_db.update_location_data("65d929897e1c6f8b7c75fe5b", [updated_longitude, updated_latitude])
+        print("Location updated")
+        time.sleep(interval)
         
 if __name__ == "__main__":
+    # socketio.run(app, debug=True)
+    
+    # while True:
+    #     print("Loop started")  # Debug statement to indicate loop start
+        
+    #     # Simulate movement by incrementing latitude and longitude by 0.01
+    #     user = Locations_db.get_location_by_user_id("65d929897e1c6f8b7c75fe5b")
+        
+    #     current_latitude = user['location']['coordinates'][1]
+    #     current_longitude = user['location']['coordinates'][0]
+    #     updated_latitude = current_latitude + 0.01
+    #     updated_longitude = current_longitude + 0.01
+
+    #     Locations_db.update_location_data("65d929897e1c6f8b7c75fe5b", [updated_longitude, updated_latitude])
+        
+    #     print("Location updated")  # Debug statement to indicate location update
+        
+    #     # Wait for 5 seconds before the next update
+    #     time.sleep(5)
+    # location_process = multiprocessing.Process(target=location_update)
+    # location_process.start()
+
+    # # Start Flask Socket.IO server in the main process
     socketio.run(app, debug=True)

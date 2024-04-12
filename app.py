@@ -15,9 +15,8 @@ import multiprocessing
 
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="https://wastemanagement.waste4meal.com", manage_session=False)
+socketio = SocketIO(app, cors_allowed_origins="https://wastemanagement.waste4meal.com")
 # socketio = SocketIO(app, cors_allowed_origins='*', manage_session=False)
-
 
 
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'

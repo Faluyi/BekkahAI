@@ -15,8 +15,8 @@ import multiprocessing
 
 app = Flask(__name__)
 CORS(app)
-# socketio = SocketIO(app, cors_allowed_origins="https://wastemanagement.waste4meal.com")
-socketio = SocketIO(app, cors_allowed_origins='*', manage_session=False)
+socketio = SocketIO(app, cors_allowed_origins="https://wastemanagement.waste4meal.com", manage_session=False)
+# socketio = SocketIO(app, cors_allowed_origins='*', manage_session=False)
 
 
 
@@ -576,7 +576,8 @@ def pick_donation(current_user, donation_id):
         
         user_dtls = Users_db.get_user_by_id(str(donation_dtls["donor_id"]))
         
-        weightiest_waste = user_dtls["weightiest_waste_donated"] if user_dtls["weightiest_waste_donated"] is not None else 0
+        if "weightiest_waste_donated" in user_dtls:
+            weightiest_waste = user_dtls["weightiest_waste_donated"]
         
         current_weightiest_waste = max(weightiest_waste, body["weight"]/1000)
         Users_db.update_weightiest_waste_donated(str(donation_dtls["donor_id"]), current_weightiest_waste)
@@ -1386,7 +1387,7 @@ def location_update(interval=5):
         time.sleep(interval)
         
 if __name__ == "__main__":
-    # socketio.run(app, debug=True)
+    socketio.run(app, debug=True)
     
     # while True:
     #     print("Loop started")  # Debug statement to indicate loop start
@@ -1405,8 +1406,8 @@ if __name__ == "__main__":
         
     #     # Wait for 5 seconds before the next update
     #     time.sleep(5)
-    # location_process = multiprocessing.Process(target=location_update)
-    # location_process.start()
+    #     location_process = multiprocessing.Process(target=location_update)
+    #     location_process.start()
 
-    # # Start Flask Socket.IO server in the main process
-    socketio.run(app, debug=True)
+    # # # Start Flask Socket.IO server in the main process
+    # socketio.run(app, debug=True)

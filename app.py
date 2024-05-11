@@ -161,7 +161,7 @@ def sign_in():
             app.logger.info(token)
             
             session["user_id"] = str(user_profile["_id"])
-            
+           
             if user_profile["role"] == "donor" and "active_donations_aggregator_id" in user_profile:
                 session["tracker_id"] = user_profile["active_donations_aggregator_id"][0]
                                                          
@@ -175,6 +175,17 @@ def sign_in():
                 }
             }), 200
         
+        except IndexError:
+            return jsonify({
+                "status": "success",
+                "message": "Authentication successful",
+                "response": {
+                    "token": token,
+                    "role": user_profile["role"],
+                    "user_id": str(user_profile["_id"])
+                }
+            }), 200
+            
         except Exception as e:
             app.logger.exception(e)
             return {
@@ -1212,7 +1223,7 @@ def get_rejected_deliveries(current_user):
             "message": "Internal server error"
         }
         
-@app.get('/api/delivery/<donation_id>/confirm')
+@app.patch('/api/delivery/<donation_id>/confirm')
 @token_required
 def confirm_delivery(current_user, donation_id):
     
